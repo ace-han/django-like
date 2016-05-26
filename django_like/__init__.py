@@ -1,27 +1,33 @@
 import django
 
-from django.db import backend
+from django.db import connection
+
+_backend_name = connection.vendor.lower()
 
 
 if django.VERSION[0] == 1 and django.VERSION[1] >= 7:
 
-    from django.db.models.lookups import Contains, IContains
+    from django.db.models.lookups import BuiltinLookup, Contains, IContains
     from django.db.models import Field
 
-    class Like(Contains):
+    class RawLikeQueryMixin(object):
+        def process_rhs(self, qn, connection):
+            rhs, params = super(BuiltinLookup, self).process_rhs(qn, connection)
+            return rhs, params
+
+    class Like(RawLikeQueryMixin, Contains):
         lookup_name = 'like'
 
         def get_rhs_op(self, connection, rhs):
             return connection.operators['contains'] % rhs
 
-    class ILike(IContains):
+    class ILike(RawLikeQueryMixin, IContains):
         lookup_name = 'ilike'
 
         def process_lhs(self, qn, connection):
             lhs_sql, params = super(ILike, self).process_lhs(qn, connection)
-            backend_name = backend.__name__
-            if 'postgres' in backend_name or \
-               'oracle' in backend_name:
+            if 'postgres' in _backend_name or \
+               'oracle' in _backend_name:
                 lhs_sql = 'UPPER(%s)' % lhs_sql
             return (lhs_sql, params)
 
@@ -84,9 +90,8 @@ else:
         return self.lookup_cast_origin(lookup_type)
 
     def monkey_ilike():
-        backend_name = backend.__name__
-        if 'postgres' in backend_name or \
-           'oracle' in backend_name:
+        if 'postgres' in _backend_name or \
+           'oracle' in _backend_name:
             connection.ops.__class__.lookup_cast_origin = connection.ops.lookup_cast
             connection.ops.__class__.lookup_cast = lookup_cast
 
